@@ -251,6 +251,7 @@ event_table create_events(size_t const *peaks, double const *sums,
 
     et.n = n;
     et.end = et.n;
+    
 
 
     // First event -- starts at zero

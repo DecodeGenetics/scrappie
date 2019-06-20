@@ -84,11 +84,53 @@ raw_table read_raw(const char *filename, bool scale_to_pA) {
     H5Lget_name_by_idx(hdf5file, root, H5_INDEX_NAME, H5_ITER_INC, 0, name,
                        1 + size, H5P_DEFAULT);
 
+
     // Create group name
     char *signal_path = calloc(rootstr_len + size + 8, sizeof(char));
     (void)snprintf(signal_path, rootstr_len + size + 8, "%s%s/Signal", root,
                    name);
+    
+    //printf("Name is: %s\n", name);
+   
+
+   
+    char read_group_path[1000];
+    strcpy(read_group_path, root);
+    //char *read_group_path = "/Raw/Reads/";
+    strcat(read_group_path, name);
     free(name);
+    //printf("%s\n", read_group_path);
+
+    hid_t read_group = H5Gopen(hdf5file, read_group_path, H5P_DEFAULT);
+    hid_t read_id_attr = H5Aopen(read_group, "read_id", H5P_DEFAULT);
+
+    //printf("read_id_attr is: %d\n", read_id_attr);
+    hid_t atype = H5Aget_type(read_id_attr);
+    //printf("atype is: %d\n", atype);
+    hsize_t sz = H5Aget_storage_size(read_id_attr);
+    int sz_int = sz;
+    //printf("sz isSSS: %d\n", sz);
+    //printf("sz sz_int: %d\n", sz_int);
+    char * char_val = calloc(sz + 1, sizeof(char));
+    if (sz == 16)
+    {
+        H5Aread(read_id_attr, atype, &char_val);
+    }
+    else if (sz == 38)
+    {
+        H5Aread(read_id_attr, atype, char_val);
+    }
+    else
+    {
+        warnx("The read_id is neighter 16 nor 38 as expected. Close.");
+        goto cleanup1;
+    }
+    
+    //printf("read id is: %s\n", char_val);
+    H5Aclose(read_id_attr);
+    H5Gclose(read_group);
+    
+
 
     hid_t dset = H5Dopen(hdf5file, signal_path, H5P_DEFAULT);
     if (dset < 0) {
@@ -114,8 +156,8 @@ raw_table read_raw(const char *filename, bool scale_to_pA) {
         goto cleanup4;
     }
     rawtbl = (raw_table) {
-    nsample, 0, nsample, rawptr};
-
+    nsample, 0, nsample, rawptr, char_val};
+    //free(char_val);
     if (scale_to_pA) {
         const fast5_raw_scaling scaling = get_raw_scaling(hdf5file);
         const float raw_unit = scaling.range / scaling.digitisation;

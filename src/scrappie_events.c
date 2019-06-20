@@ -21,18 +21,24 @@
 // Doesn't play nice with other headers, include last
 #include <argp.h>
 
+
+const int TOO_MUCH_EVENTNUM = 1000000;
+
 struct _bs {
     float score;
     int nev;
     char *bases;
     event_table et;
+    output_events out_e;
+    char * readname;
 };
 
 static const struct _bs _bs_null = {
     .score = 0.0f,
     .nev = 0,
     .bases = NULL,
-    .et = {0, 0, 0, NULL}
+    .et = {0, 0, 0, NULL},
+    .readname = NULL
 };
 
 extern const char *argp_program_version;
@@ -78,6 +84,7 @@ struct arguments {
     int limit;
     float min_prob;
     FILE * output;
+    char * output_char;
     char * prefix;
     float skip_pen;
     float stay_pen;
@@ -98,6 +105,7 @@ static struct arguments args = {
     .limit = 0,
     .min_prob = 1e-5f,
     .output = NULL,
+    .output_char = "",
     .prefix = "",
     .outformat = FORMAT_FASTA,
     .skip_pen = 0.0f,
@@ -120,6 +128,7 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state) {
     case 'f':
         if (0 == strcasecmp("FASTA", arg)) {
             args.outformat = FORMAT_FASTA;
+            args.output_char = arg;
         } else if (0 == strcasecmp("SAM", arg)) {
             args.outformat = FORMAT_SAM;
         } else {
@@ -251,6 +260,13 @@ static struct _bs calculate_post(char *filename) {
         return _bs_null;
     }
 
+    //added by dorukb
+    if (et.n > TOO_MUCH_EVENTNUM) {
+        free(rt.raw);
+        return _bs_null;
+    }
+
+
     scrappie_matrix post = nanonet_posterior(et, args.min_prob, true);
     if (NULL == post) {
         free(et.event);
@@ -289,20 +305,92 @@ static struct _bs calculate_post(char *filename) {
         }
     }
 
+
+
+     // MODIFIED BY dorukb. 
+    // Store the events
+    //FILE * event_out_FILE;
+   // event_out_FILE = fopen(strcat(filename, ".events"), "w");
+    //fprintf (event_out_FILE, "event_pos\tevent_state\tevent_mean\tevend_sd\tstart_time\tlength_in_seconds\tstate\tkmer\n");
+
+    output_events oe = { 0 };
+    oe.n = et.n;
+    oe.event_list = calloc(et.n, sizeof(out_event));
+    //RETURN_NULL_IF(NULL == et.event, et);
+
+
+    double start_time = 0;
+    const char event_base_lookup[4] = { 'A', 'C', 'G', 'T' };
+    for(size_t ee = 0; ee < et.n; ++ee) 
+    {
+        //float length_in_seconds = et.event[i].length / this->sample_rate;
+        int kmer = history_state[ee];
+        const int kmer_len = 5;
+        char *bases = calloc(kmer_len, sizeof(char));
+        for (int k = 1; k <= kmer_len; k++) 
+        {
+            int b = kmer & 3;
+            kmer >>= 2;
+            bases[kmer_len - k] = event_base_lookup[b];
+        }
+        if (kmer == -1)
+        {
+            bases = "NNNNN";
+        }
+        out_event one_out_event = { 0 };
+        // Just print the non stay events.
+       // if (kmer != -1)
+        //{
+        //printf ("%d\t%d\t%f\t%f\t%f\t%f\t%s\n", et.event[ee].pos, et.event[ee].state, et.event[ee].mean, et.event[ee].stdv, start_time, et.event[ee].length, bases);
+       // }
+
+        //copy required data here.
+        one_out_event.pos = et.event[ee].pos;
+        one_out_event.state = et.event[ee].state;
+        one_out_event.mean = et.event[ee].mean;
+        one_out_event.stdv = et.event[ee].stdv;
+        one_out_event.start_time = start_time;
+        one_out_event.event_length = et.event[ee].length;
+        one_out_event.bases = bases;
+        oe.event_list[ee] = one_out_event;
+        // done copying.
+        //printf ("%d\t%d\t%f\t%f\t%f\t%f\t%s\n", oe.event_list[ee].pos, oe.event_list[ee].state, oe.event_list[ee].mean, oe.event_list[ee].stdv, oe.event_list[ee].start_time, oe.event_list[ee].event_length, oe.event_list[ee].bases);
+        start_time += et.event[ee].length;
+    }
+    //fclose(event_out_FILE);
+
     free(pos);
     free(history_state);
     free(rt.raw);
 
     return (struct _bs) {
-    score, nev, basecall, et};
+    score, nev, basecall, et, oe, rt.readname};
 }
 
-static int fprintf_fasta(FILE * fp, const char *readname, const char * prefix, const struct _bs res) {
+
+//added by dorukb
+static int fprintf_event_table(FILE * fp, const struct _bs res) {
+    //printf("%d\n", (int)res.out_e.n);
+    for (int i = 0; i < res.out_e.n; i++)
+    {   
+        //fprintf(fp,  "%d\n", i);
+        fprintf(fp, "%d\t%d\t%f\t%f\t%f\t%f\t%s\n",
+                   res.out_e.event_list[i].pos, res.out_e.event_list[i].state, res.out_e.event_list[i].mean, res.out_e.event_list[i].stdv, 
+                   res.out_e.event_list[i].start_time, res.out_e.event_list[i].event_length, res.out_e.event_list[i].bases);
+    }
+    return 0;
+}
+
+
+static int fprintf_fasta(FILE * fp, char * fname, const char *readname, const char * prefix, const struct _bs res) {
     const int nbase = strlen(res.bases);
+    // return fprintf(fp,
+    //                ">%s %s%s {\"normalised_score\": %f,  \"nevent\": %d,  \"sequence_length\": %d,  \"events_per_base\": %f}\n%s\n",
+    //                res.readname, prefix, readname, -res.score / res.nev, res.nev, nbase,
+    //                (float)res.nev / (float)nbase, res.bases);
     return fprintf(fp,
-                   ">%s%s  { \"normalised_score\" : %f,  \"nevent\" : %d,  \"sequence_length\" : %d,  \"events_per_base\" : %f }\n%s\n",
-                   prefix, readname, -res.score / res.nev, res.nev, nbase,
-                   (float)res.nev / (float)nbase, res.bases);
+                   ">%s %s%s {\"normalised_score\":%f,  \"nevent\":%d,  \"sequence_length\":%d}\n%s\n",
+                   res.readname, prefix, readname, -res.score / res.nev, res.nev, nbase, res.bases);
 }
 
 static int fprintf_sam(FILE * fp, const char *readname, const char * prefix, const struct _bs res) {
@@ -374,6 +462,13 @@ int main_events(int argc, char *argv[]) {
             reads_started += 1;
 
             char *filename = globbuf.gl_pathv[fn2];
+
+            // FILE * event_out_FILE;
+            // char events_fname[5000];
+            // strcpy(events_fname, filename);
+            // strcat(events_fname, ".events");
+            // event_out_FILE = fopen(events_fname, "w");
+
             struct _bs res = calculate_post(filename);
             if (NULL == res.bases) {
                 warnx("No basecall returned for %s", filename);
@@ -383,9 +478,20 @@ int main_events(int argc, char *argv[]) {
             {
                 switch (args.outformat) {
                 case FORMAT_FASTA:
-                    fprintf_fasta(args.output,
+                    fprintf_fasta(args.output, filename,
                                   basename(filename),
                                   args.prefix, res);
+                    FILE * event_out_FILE;
+                    char events_fname[5000];
+                    strcpy(events_fname, filename);
+                    strcat(events_fname, ".events");
+                    //printf("%s\n", filename);
+                    event_out_FILE = fopen(events_fname, "w");
+                    fprintf_event_table(event_out_FILE, res);
+                    fclose(event_out_FILE);
+                    //printf("%s\n", filename);
+
+                    
                     break;
                 case FORMAT_SAM:
                     fprintf_sam(args.output,
@@ -415,6 +521,8 @@ int main_events(int argc, char *argv[]) {
     if(stdout != args.output){
         fclose(args.output);
     }
+
+    //fclose(event_out_FILE);
 
     return EXIT_SUCCESS;
 }
