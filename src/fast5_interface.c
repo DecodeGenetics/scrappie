@@ -116,15 +116,23 @@ raw_table read_raw(const char *filename, bool scale_to_pA) {
     {
         H5Aread(read_id_attr, atype, &char_val);
     }
-    else if (sz == 38)
+    else
     {
         H5Aread(read_id_attr, atype, char_val);
     }
-    else
-    {
-        warnx("The read_id is neighter 16 nor 38 as expected. Close.");
-        goto cleanup1;
-    }
+    // else if (sz == 38)
+    // {
+    //     H5Aread(read_id_attr, atype, char_val);
+    // }
+    // else if (sz == 37)
+    // {
+    //     H5Aread(read_id_attr, atype, char_val);
+    // }
+    // else
+    // {
+    //     warnx("The read_id is neighter 16, 38, or 37 as expected. Close.");
+    //     goto cleanup1;
+    // }
     
     //printf("read id is: %s\n", char_val);
     H5Aclose(read_id_attr);
